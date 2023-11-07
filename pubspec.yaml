@@ -21,9 +21,11 @@ dependencies:
   fetch_api: ^1.0.0
   http: '>=0.13.5 <2.0.0'
 
-# dependency_overrides:
-#   fetch_api:
-#     git: https://github.com/Zekfad/fetch_api
+dependency_overrides:
+  fetch_api:
+    git: 
+      url: https://github.com/thiagocarvalhodev/fetch_api.git
+      ref: PE-4966
 
 dev_dependencies:
   build_runner: '>=2.4.6'

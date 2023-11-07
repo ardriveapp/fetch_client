@@ -29,7 +29,11 @@ class FetchClient extends BaseClient {
     this.integrity = '',
     this.redirectPolicy = RedirectPolicy.alwaysFollow,
     this.streamRequests = false,
-  }) : _abortController = AbortController();
+    bool handleBackPressure = false,
+  })  : _handleBackPressure = handleBackPressure,
+        _abortController = AbortController();
+
+  final bool _handleBackPressure;
 
   final AbortController _abortController;
 
@@ -85,6 +89,7 @@ class FetchClient extends BaseClient {
       body = fetch_compatibility_layer.createReadableStream(
         fetch_compatibility_layer.createReadableStreamSourceFromStream(
           byteStream,
+          _handleBackPressure,
         ),
       );
     } else {
