@@ -1,14 +1,15 @@
-import 'package:fetch_api/compatibility_layer.dart' as fetch_compatibility_layer;
+import 'package:fetch_api/compatibility_layer.dart'
+    as fetch_compatibility_layer;
 import 'package:fetch_api/fetch_api.dart';
 import 'package:http/http.dart' show BaseClient, BaseRequest, ClientException;
+
 import 'fetch_response.dart';
 import 'on_done.dart';
 import 'redirect_policy.dart';
 
-
 /// HTTP client based on Fetch API.
 /// It does support streaming and can handle non 200 responses.
-/// 
+///
 /// This implementation has some restrictions:
 /// * [BaseRequest.persistentConnection] is translated to
 ///   [FetchOptions.keepalive] (if [streamRequests] is disabled).
@@ -17,7 +18,7 @@ import 'redirect_policy.dart';
 ///   information via [FetchResponse.redirected] and [FetchResponse.url]).
 ///   If [BaseRequest.followRedirects] is `false` [redirectPolicy] takes place
 ///   and dictates [FetchClient] actions.
-/// * [BaseRequest.maxRedirects] is ignored. 
+/// * [BaseRequest.maxRedirects] is ignored.
 class FetchClient extends BaseClient {
   FetchClient({
     this.mode = RequestMode.noCors,
@@ -26,9 +27,15 @@ class FetchClient extends BaseClient {
     this.referrer = '',
     this.referrerPolicy = RequestReferrerPolicy.strictOriginWhenCrossOrigin,
     this.integrity = '',
-    this.redirectPolicy = RedirectPolicy.alwaysFollow, 
+    this.redirectPolicy = RedirectPolicy.alwaysFollow,
     this.streamRequests = false,
-  });
+    bool handleBackPressure = false,
+  })  : _handleBackPressure = handleBackPressure,
+        _abortController = AbortController();
+
+  final bool _handleBackPressure;
+
+  final AbortController _abortController;
 
   /// The mode you want to use for the request
   final RequestMode mode;
@@ -57,10 +64,10 @@ class FetchClient extends BaseClient {
   final RedirectPolicy redirectPolicy;
 
   /// Whether to use [ReadableStream] as body for requests streaming.
-  /// 
+  ///
   /// **NOTICE**: This feature is supported only in __Chromium 105+__ based browsers and
   /// requires server to be HTTP/2 or HTTP/3.
-  /// 
+  ///
   /// See [compatibility chart](https://developer.mozilla.org/en-US/docs/Web/API/Request#browser_compatibility)
   /// and [Chrome Developers blog](https://developer.chrome.com/articles/fetch-streaming-requests/#doesnt-work-on-http1x)
   /// for more info.
@@ -72,8 +79,7 @@ class FetchClient extends BaseClient {
 
   @override
   Future<FetchResponse> send(BaseRequest request) async {
-    if (_closed)
-      throw ClientException('Client is closed', request.url);
+    if (_closed) throw ClientException('Client is closed', request.url);
 
     final byteStream = request.finalize();
     final dynamic body;
@@ -83,6 +89,7 @@ class FetchClient extends BaseClient {
       body = fetch_compatibility_layer.createReadableStream(
         fetch_compatibility_layer.createReadableStreamSourceFromStream(
           byteStream,
+          _handleBackPressure,
         ),
       );
     } else {
@@ -90,13 +97,13 @@ class FetchClient extends BaseClient {
       body = bytes.isEmpty ? null : bytes;
     }
 
-    final abortController = AbortController();
     final init = fetch_compatibility_layer.createFetchOptions(
       body: body,
       method: request.method,
-      redirect: (request.followRedirects || redirectPolicy == RedirectPolicy.alwaysFollow)
-        ? RequestRedirect.follow
-        : RequestRedirect.manual,
+      redirect: (request.followRedirects ||
+              redirectPolicy == RedirectPolicy.alwaysFollow)
+          ? RequestRedirect.follow
+          : RequestRedirect.manual,
       headers: fetch_compatibility_layer.createHeadersFromMap(request.headers),
       mode: mode,
       credentials: credentials,
@@ -104,7 +111,7 @@ class FetchClient extends BaseClient {
       referrer: referrer,
       referrerPolicy: referrerPolicy,
       keepalive: !streamRequests && request.persistentConnection,
-      signal: abortController.signal,
+      signal: _abortController.signal,
       duplex: !streamRequests ? null : RequestDuplex.half,
     );
 
@@ -112,16 +119,14 @@ class FetchClient extends BaseClient {
     try {
       response = await fetch(request.url.toString(), init);
 
-      if (
-        response.type == 'opaqueredirect' &&
-        !request.followRedirects &&
-        redirectPolicy != RedirectPolicy.alwaysFollow
-      )
+      if (response.type == 'opaqueredirect' &&
+          !request.followRedirects &&
+          redirectPolicy != RedirectPolicy.alwaysFollow)
         return _probeRedirect(
           request: request,
           initialResponse: response,
           init: init,
-          abortController: abortController,
+          abortController: _abortController,
         );
     } catch (e) {
       throw ClientException('Failed to execute fetch: $e', request.url);
@@ -139,7 +144,7 @@ class FetchClient extends BaseClient {
     abort = () {
       _abortCallbacks.remove(abort);
       reader.cancel<dynamic>();
-      abortController.abort();
+      _abortController.abort();
     };
     _abortCallbacks.add(abort);
 
@@ -154,14 +159,13 @@ class FetchClient extends BaseClient {
       redirected: response.redirected,
       request: request,
       headers: {
-        for (final header in response.headers.entries())
-          header.first: header.last,
+        // for (final header in response.headers.entries())
+        //   header.first: header.last,
       },
       isRedirect: false,
       persistentConnection: false,
       reasonPhrase: response.statusText,
-      contentLength: contentLength == null ? null
-        : int.tryParse(contentLength),
+      contentLength: contentLength == null ? null : int.tryParse(contentLength),
     );
   }
 
@@ -184,8 +188,7 @@ class FetchClient extends BaseClient {
       response = await fetch(request.url.toString(), init);
 
       // Cancel before even reading response
-      if (redirectPolicy == RedirectPolicy.probe)
-        abortController.abort();
+      if (redirectPolicy == RedirectPolicy.probe) abortController.abort();
     } catch (e) {
       throw ClientException('Failed to execute probe fetch: $e', request.url);
     }
@@ -214,10 +217,11 @@ class FetchClient extends BaseClient {
   /// This method also terminates all associated active requests.
   @override
   void close() {
+    _abortController.abort();
+
     if (!_closed) {
       _closed = true;
-      for (final abort in _abortCallbacks.toList())
-        abort();
+      for (final abort in _abortCallbacks.toList()) abort();
     }
   }
 }
